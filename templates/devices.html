@@ -1,0 +1,431 @@
+{% extends 'layout.html' %}
+{% block title %}設備管理 - 網路拓樸管理系統{% endblock %}
+{% block head %}
+<style>
+    body { overflow: hidden !important; }
+    
+    .table-container { height: calc(100vh - 210px); overflow-y: auto; background: white; border: 1px solid #dee2e6; border-radius: 5px; }
+    .table-container th { position: sticky; top: 0; background-color: #e9ecef; color: #333; z-index: 10; border-bottom: 2px solid #dee2e6; font-weight: bold; padding: 0.35rem 0.5rem; font-size: 0.9rem; }
+    .table-container td { vertical-align: middle; padding: 0.2rem 0.5rem; }
+    
+    .form-control-sm, .form-select-sm { padding: 0.15rem 0.4rem; font-size: 0.85rem; min-height: 26px; border-radius: 3px; border: 1px solid #ced4da; box-shadow: none; }
+    .form-control-sm:focus, .form-select-sm:focus { border-color: #80bdff; box-shadow: 0 0 0 0.2rem rgba(0,123,255,.25); }
+    .form-check-input { width: 1.1rem; height: 1.1rem; cursor: pointer; margin: 0; }
+    
+    .scan-table { table-layout: fixed; width: 100%; margin-bottom: 0; }
+    .scan-table td { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; vertical-align: middle; }
+    .scan-table th { 
+        position: sticky; 
+        top: 0; 
+        background-color: #f8f9fa; 
+        z-index: 10; 
+        box-shadow: inset 0 -2px 0 #dee2e6;
+        border-bottom: none; 
+        padding: 0.5rem;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="container-fluid mt-2">
+    
+    <div class="d-flex justify-content-between align-items-center mb-2">
+        <h5 class="m-0 fw-bold text-dark"><i class="bi bi-file-earmark-spreadsheet me-2"></i>編輯設備清單 (devices.csv)</h5>
+        
+        <div class="d-flex align-items-center gap-2">
+            <div class="btn-group shadow-sm">
+                <button class="btn btn-dark btn-sm pe-none"><i class="bi bi-download me-1"></i>匯出備份</button>
+                <button class="btn btn-light btn-sm border" onclick="exportData('csv')">CSV (Excel)</button>
+                <button class="btn btn-light btn-sm border" onclick="exportData('json')">JSON (完整)</button>
+            </div>
+            
+            <div class="btn-group shadow-sm">
+                <button class="btn btn-dark btn-sm pe-none"><i class="bi bi-upload me-1"></i>還原匯入</button>
+                <button class="btn btn-primary btn-sm" onclick="triggerImport('csv')">匯入 CSV</button>
+                <button class="btn btn-info btn-sm text-white" onclick="triggerImport('json')">匯入 JSON</button>
+            </div>
+
+            <button class="btn btn-outline-primary btn-sm fw-bold shadow-sm ms-2" onclick="openScanModal()">
+                <i class="bi bi-radar me-1"></i>網段探索
+            </button>
+
+            <button class="btn btn-success btn-sm shadow-sm ms-1" onclick="addRow()">
+                <i class="bi bi-plus-lg me-1"></i>新增設備
+            </button>
+        </div>
+    </div>
+
+    <input type="file" id="import-csv-file" accept=".csv" style="display: none;" onchange="handleFileUpload(event, 'csv')">
+    <input type="file" id="import-json-file" accept=".json" style="display: none;" onchange="handleFileUpload(event, 'json')">
+
+    <div class="alert alert-info py-1 px-3 mb-2 shadow-sm d-flex align-items-center" role="alert" style="background-color: #d1ecf1; border-color: #bee5eb; color: #0c5460; font-size: 0.9rem;">
+        <i class="bi bi-lightbulb me-2 fs-6"></i> 
+        <span>提示：直接在表格修改資料，按下底部儲存即可。若要隱藏特定設備，請取消勾選「顯示」。</span>
+    </div>
+    
+    <div class="table-container shadow-sm">
+        <table class="table table-hover mb-0" id="deviceTable">
+            <thead>
+                <tr>
+                    <th width="4%" class="text-center">顯示</th>
+                    <th width="12%">IP 位址</th>
+                    <th width="16%">設備名稱 (Hostname)</th>
+                    <th width="10%">設備種類</th>
+                    <th width="11%">設備廠牌</th>
+                    <th width="15%">設備型號</th>
+                    <th width="6%">層級</th>
+                    <th width="10%">Community</th>
+                    <th width="12%">放置區域</th>
+                    <th width="4%" class="text-center"><i class="bi bi-trash"></i></th>
+                </tr>
+            </thead>
+            <tbody id="deviceTbody">
+            </tbody>
+        </table>
+    </div>
+
+    <div class="mt-2 d-flex justify-content-end">
+        <button class="btn btn-primary shadow fw-bold px-5" onclick="saveAll()">
+            <i class="bi bi-save me-2"></i>儲存所有變更
+        </button>
+    </div>
+</div>
+
+<div class="modal fade" id="scanSubnetModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content shadow-lg" style="max-height: 85vh;">
+      
+      <div class="modal-header bg-dark text-white py-2">
+        <h6 class="modal-title m-0"><i class="bi bi-radar me-2"></i>SNMP 網段探索工具</h6>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      
+      <div class="bg-light p-3 border-bottom">
+        <div class="row g-2">
+            <div class="col-md-4">
+                <label class="form-label text-secondary small fw-bold mb-1">目標網段 (CIDR 格式)</label>
+                <input type="text" class="form-control form-control-sm" id="scanSubnet" value="192.168.0.1/24" placeholder="例如: 192.168.0.1/24">
+            </div>
+            <div class="col-md-6">
+                <label class="form-label text-secondary small fw-bold mb-1" title="可輸入多組，以逗號分隔">SNMP Community (多組請以逗號區隔)</label>
+                <input type="text" class="form-control form-control-sm" id="scanCommunity" value="public, SnmpPublic@TPC">
+            </div>
+            <div class="col-md-2 d-flex align-items-end">
+                <button class="btn btn-info btn-sm text-white w-100 fw-bold" id="btnStartScan" onclick="startSubnetScan()">
+                    開始掃描
+                </button>
+            </div>
+        </div>
+        <h6 class="fw-bold text-success mt-2 mb-0 d-none" id="scanSummary" style="font-size:0.9rem;"></h6>
+      </div>
+
+      <div class="modal-body p-0" style="overflow-y: auto; height: 50vh;">
+        <div id="scanLoading" class="text-center py-5 d-none">
+            <div class="spinner-border text-info mb-2" role="status"></div>
+            <h6 class="text-secondary">正在搜尋網段 SNMP 資料，請稍候...</h6>
+            <small class="text-muted">（輪詢多組密碼約需 3~8 秒，請耐心等待）</small>
+        </div>
+
+        <table class="table scan-table table-sm table-hover d-none" id="scanResultsTable">
+            <thead>
+                <tr>
+                    <th width="6%" class="text-center"><input class="form-check-input" type="checkbox" id="checkAllScan" onclick="toggleAllScanResults()"></th>
+                    <th width="16%">IP 位址</th>
+                    <th width="20%">發現名稱</th>
+                    <th width="12%">命中密碼</th>
+                    <th width="20%">擷取型號</th>
+                    <th width="26%">系統描述摘要</th>
+                </tr>
+            </thead>
+            <tbody id="scanResultsTbody">
+            </tbody>
+        </table>
+      </div>
+      
+      <div class="modal-footer bg-light py-2 d-none" id="scanFooter">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">取消</button>
+        <button type="button" class="btn btn-primary btn-sm" onclick="addSelectedDevices()"><i class="bi bi-box-arrow-in-down me-1"></i>勾選加入明細表</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index: 1100" id="toastPlacement"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    var currentDevices = [];
+    var scannedDevices = [];
+    var scanModalInstance = null;
+    
+    // 預設內建廠牌庫
+    var knownBrands = new Set(['Unknown', 'Aruba', 'Ruckus', 'MikroTik', 'Fortinet', 'D-Link', 'Cisco', 'HP', 'QNAP', 'Dell', 'Palo Alto']);
+
+    document.addEventListener("DOMContentLoaded", function() {
+        scanModalInstance = new bootstrap.Modal(document.getElementById('scanSubnetModal'));
+        loadDevices();
+    });
+
+    function showToast(message, type = 'success') {
+        const toastContainer = document.getElementById('toastPlacement');
+        const toastId = 'toast-' + Date.now();
+        let bgColor = type === 'danger' ? 'bg-danger' : (type === 'warning' ? 'bg-warning text-dark' : 'bg-success');
+        let icon = type === 'danger' ? 'bi-x-circle-fill' : 'bi-check-circle-fill';
+
+        const toastHTML = `<div id="${toastId}" class="toast align-items-center text-white ${bgColor} border-0 mb-2 shadow-sm" role="alert"><div class="d-flex"><div class="toast-body fw-bold" style="font-size:0.9rem;"><i class="bi ${icon} me-2"></i>${message}</div><button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button></div></div>`;
+        toastContainer.insertAdjacentHTML('beforeend', toastHTML);
+        new bootstrap.Toast(document.getElementById(toastId)).show();
+    }
+
+    function exportData(fmt) { window.location.href = `/api/backup/export/${fmt}`; }
+    function triggerImport(fmt) { document.getElementById(`import-${fmt}-file`).click(); }
+
+    function handleFileUpload(event, fmt) {
+        const file = event.target.files[0];
+        if (!file) return;
+        const formData = new FormData();
+        formData.append('file', file);
+        
+        if(fmt === 'json') {
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                fetch('/api/backup/import/json', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: e.target.result
+                }).then(res => res.json()).then(data => {
+                    showToast(data.message, data.success ? 'success' : 'danger');
+                    if (data.success) loadDevices();
+                }).catch(err => showToast("上傳失敗: " + err.message, "danger"));
+            };
+            reader.readAsText(file);
+        } else {
+            fetch('/api/backup/import/csv', { method: 'POST', body: formData })
+            .then(res => res.json()).then(data => {
+                showToast(data.message, data.success ? 'success' : 'danger');
+                if (data.success) loadDevices();
+            }).catch(err => showToast("上傳失敗: " + err.message, "danger"));
+        }
+        event.target.value = ''; 
+    }
+
+    function loadDevices() {
+        fetch('/api/devices').then(res => res.json()).then(data => {
+            currentDevices = data;
+            
+            // 從現有資料庫學習並擴充廠牌庫
+            currentDevices.forEach(d => {
+                let b = (d.brand || '').trim();
+                if(b) knownBrands.add(b);
+            });
+            
+            renderTable();
+        });
+    }
+
+    // 💡 新增：處理廠牌變更的專屬函式，支援「手動新增」功能
+    function handleBrandChange(index, selectElem) {
+        if (selectElem.value === 'ADD_NEW_BRAND') {
+            let newBrand = prompt("請輸入自訂的設備廠牌名稱：");
+            if (newBrand && newBrand.trim() !== '') {
+                newBrand = newBrand.trim();
+                knownBrands.add(newBrand);
+                currentDevices[index].brand = newBrand;
+                renderTable(); // 重新渲染表格，新廠牌就會出現在所有選單中
+            } else {
+                renderTable(); // 如果取消或未輸入，還原為原本的值
+            }
+        } else {
+            updateData(index, 'brand', selectElem.value);
+        }
+    }
+
+    function renderTable() {
+        const tbody = document.getElementById('deviceTbody');
+        tbody.innerHTML = '';
+        currentDevices.forEach((dev, index) => {
+            // 處理設備種類下拉選單
+            const allowedTypes = ['交換器', '防火牆', 'AP', '路由器', '伺服器', '其他'];
+            let typeOptions = '';
+            let typeFound = false;
+            allowedTypes.forEach(t => {
+                if(dev.type === t) { typeOptions += `<option value="${t}" selected>${t}</option>`; typeFound = true; }
+                else { typeOptions += `<option value="${t}">${t}</option>`; }
+            });
+            if (!typeFound && dev.type) { typeOptions += `<option value="${dev.type}" selected>${dev.type}</option>`; }
+
+            // 💡 處理設備廠牌真正的下拉選單 (Select)
+            let brandOptions = '';
+            let brandFound = false;
+            Array.from(knownBrands).sort().forEach(b => {
+                if (dev.brand === b) { brandOptions += `<option value="${b}" selected>${b}</option>`; brandFound = true; }
+                else { brandOptions += `<option value="${b}">${b}</option>`; }
+            });
+            // 確保資料庫舊值不會遺失
+            if (!brandFound && dev.brand) { 
+                brandOptions += `<option value="${dev.brand}" selected>${dev.brand}</option>`; 
+                knownBrands.add(dev.brand); 
+            }
+            // 補上手動輸入的選項
+            brandOptions += `<option disabled>──────────</option>`;
+            brandOptions += `<option value="ADD_NEW_BRAND" class="text-primary fw-bold">➕ 手動輸入新廠牌...</option>`;
+
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+                <td class="text-center">
+                    <div class="d-flex justify-content-center align-items-center h-100">
+                        <input class="form-check-input mt-1" type="checkbox" ${dev.visible ? 'checked' : ''} onchange="updateData(${index}, 'visible', this.checked ? 1 : 0)">
+                    </div>
+                </td>
+                <td><input type="text" class="form-control form-control-sm" value="${dev.ip || ''}" onchange="updateData(${index}, 'ip', this.value)"></td>
+                <td><input type="text" class="form-control form-control-sm" value="${dev.name || ''}" onchange="updateData(${index}, 'name', this.value)"></td>
+                <td><select class="form-select form-select-sm" onchange="updateData(${index}, 'type', this.value)">${typeOptions}</select></td>
+                <td><select class="form-select form-select-sm" onchange="handleBrandChange(${index}, this)">${brandOptions}</select></td>
+                <td><input type="text" class="form-control form-control-sm" value="${dev.model || ''}" onchange="updateData(${index}, 'model', this.value)"></td>
+                <td><input type="number" class="form-control form-control-sm" value="${dev.level || 3}" min="1" max="6" onchange="updateData(${index}, 'level', this.value)"></td>
+                <td><input type="text" class="form-control form-control-sm" value="${dev.community || 'public'}" onchange="updateData(${index}, 'community', this.value)"></td>
+                <td><input type="text" class="form-control form-control-sm" value="${dev.location || ''}" onchange="updateData(${index}, 'location', this.value)"></td>
+                <td class="text-center">
+                    <button class="btn btn-outline-danger btn-sm py-0 px-2 border-0" onclick="removeRow(${index})" title="刪除"><i class="bi bi-x-lg fw-bold"></i></button>
+                </td>
+            `;
+            tbody.appendChild(tr);
+        });
+    }
+
+    function updateData(index, field, value) { currentDevices[index][field] = value; }
+
+    function addRow() {
+        currentDevices.unshift({ ip: '', name: '', level: 3, community: 'public', location: '', visible: 1, type: '交換器', brand: 'Unknown', model: '' });
+        renderTable();
+        document.querySelector('.table-container').scrollTop = 0;
+    }
+
+    function removeRow(index) {
+        currentDevices.splice(index, 1);
+        renderTable();
+    }
+
+    function saveAll() {
+        const validDevices = currentDevices.filter(d => d.ip.trim() !== '');
+        if (validDevices.length === 0) return showToast("沒有有效的設備資料可儲存！", "warning");
+
+        fetch('/api/devices/bulk', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(validDevices)
+        })
+        .then(res => res.json())
+        .then(data => {
+            if(data.success) {
+                showToast("所有變更已成功寫入資料庫！", "success");
+                loadDevices();
+            } else { showToast("儲存失敗！", "danger"); }
+        });
+    }
+
+    function openScanModal() {
+        document.getElementById('scanResultsTable').classList.add('d-none');
+        document.getElementById('scanSummary').classList.add('d-none');
+        document.getElementById('scanFooter').classList.add('d-none');
+        scanModalInstance.show();
+    }
+
+    function startSubnetScan() {
+        const subnet = document.getElementById('scanSubnet').value;
+        const community = document.getElementById('scanCommunity').value;
+        if(!subnet) return alert('請輸入目標網段！');
+
+        document.getElementById('btnStartScan').disabled = true;
+        document.getElementById('scanLoading').classList.remove('d-none');
+        document.getElementById('scanResultsTable').classList.add('d-none');
+        document.getElementById('scanSummary').classList.add('d-none');
+        document.getElementById('scanFooter').classList.add('d-none');
+
+        fetch('/api/scan_subnet', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ subnet: subnet, community: community })
+        })
+        .then(res => res.json())
+        .then(data => {
+            document.getElementById('btnStartScan').disabled = false;
+            document.getElementById('scanLoading').classList.add('d-none');
+            
+            if(!data.success) return alert(data.message);
+
+            scannedDevices = data.devices;
+            document.getElementById('scanSummary').innerText = `✨ 掃描完成！共發現 ${scannedDevices.length} 台設備。`;
+            document.getElementById('scanSummary').classList.remove('d-none');
+            
+            const tbody = document.getElementById('scanResultsTbody');
+            tbody.innerHTML = '';
+            
+            const existingIps = currentDevices.map(d => d.ip);
+
+            scannedDevices.forEach((dev, i) => {
+                const isExists = existingIps.includes(dev.ip);
+                const badge = isExists ? `<span class="badge bg-secondary ms-1">已存在</span>` : `<span class="badge bg-success ms-1">新設備</span>`;
+                const tr = document.createElement('tr');
+                if(isExists) tr.classList.add('table-light', 'text-muted');
+                
+                tr.innerHTML = `
+                    <td class="text-center">
+                        <input class="form-check-input scan-checkbox mt-1" type="checkbox" value="${i}" ${isExists ? 'disabled' : 'checked'}>
+                    </td>
+                    <td class="fw-bold" style="font-size:0.85rem;">${dev.ip}</td>
+                    <td style="font-size:0.85rem;" title="${dev.name}">${dev.name} ${badge}</td>
+                    <td><span class="badge bg-dark border border-secondary text-white">${dev.community}</span></td>
+                    <td class="fw-bold" style="color: #b35900; font-size:0.85rem;" title="${dev.model}">${dev.model}</td>
+                    <td style="font-size:0.85rem;" title="${dev.sys_descr}">${dev.sys_descr}</td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            document.getElementById('scanResultsTable').classList.remove('d-none');
+            document.getElementById('scanFooter').classList.remove('d-none');
+            
+            document.getElementById('checkAllScan').checked = scannedDevices.some(d => !existingIps.includes(d.ip));
+        })
+        .catch(err => {
+            document.getElementById('btnStartScan').disabled = false;
+            document.getElementById('scanLoading').classList.add('d-none');
+            alert('掃描發生錯誤：' + err.message);
+        });
+    }
+
+    function toggleAllScanResults() {
+        const isChecked = document.getElementById('checkAllScan').checked;
+        const checkboxes = document.querySelectorAll('.scan-checkbox:not(:disabled)');
+        checkboxes.forEach(cb => cb.checked = isChecked);
+    }
+
+    function addSelectedDevices() {
+        const checkboxes = document.querySelectorAll('.scan-checkbox:checked:not(:disabled)');
+        if(checkboxes.length === 0) return alert("請至少勾選一台設備！");
+
+        let addedCount = 0;
+        checkboxes.forEach(cb => {
+            const dev = scannedDevices[cb.value];
+            currentDevices.unshift({ 
+                ip: dev.ip, 
+                name: dev.name, 
+                level: 3, 
+                community: dev.community, 
+                location: dev.location || '自動探索', 
+                visible: 1, 
+                type: '交換器', 
+                brand: dev.brand, 
+                model: dev.model 
+            });
+            addedCount++;
+        });
+
+        renderTable();
+        document.querySelector('.table-container').scrollTop = 0;
+        scanModalInstance.hide();
+        showToast(`成功將 ${addedCount} 台設備加入表格明細！請記得點擊右下角「儲存變更」。`, 'success');
+    }
+</script>
+{% endblock %}

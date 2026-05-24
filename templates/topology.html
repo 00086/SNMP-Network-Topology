@@ -1,0 +1,1122 @@
+{% extends 'layout.html' %}
+{% block title %}拓樸圖檢視 - 網路拓樸管理系統{% endblock %}
+{% block head %}
+<script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+<style>
+    body { overflow: hidden !important; }
+    
+    #mynetwork { width: 100%; height: calc(100vh - 130px); border-radius: 10px; background-color: #ffffff; transition: background-color 0.3s ease; outline: none; }
+    .info-box { background-color: #2c3e50; color: #ffe066; border-radius: 10px; height: calc(100vh - 130px); padding: 15px; display: flex; flex-direction: column; }
+    
+    #detailContent { overflow-y: auto; flex-grow: 1; padding-right: 8px; }
+    #detailContent::-webkit-scrollbar { width: 6px; }
+    #detailContent::-webkit-scrollbar-thumb { background: #6c757d; border-radius: 3px; }
+
+    .btn-group-sm > .btn, .btn-sm { padding: 0.2rem 0.5rem; font-size: 0.82rem; }
+    .input-group-text { padding: 0.2rem 0.5rem; font-size: 0.75rem; }
+
+    .btn-grid-on { background-color: #6c757d !important; color: #ffffff !important; border-color: #6c757d !important; }
+    .btn-grid-off { background-color: #ffffff !important; border: 1px solid #dee2e6 !important; color: #6c757d !important; }
+    
+    .port-list-container { background-color: #1a202c; border-radius: 5px; padding: 8px; margin-top: 5px;}
+    
+    .text-orange { color: #fd7e14 !important; }
+    .bg-orange { background-color: #fd7e14 !important; color: white !important; }
+    .text-light-yellow { color: #ffe066 !important; }
+    
+    @keyframes blink { 0% {opacity: 1;} 50% {opacity: 0.3;} 100% {opacity: 1;} }
+    .blink-danger { animation: blink 1.2s infinite; background-color: #dc3545; color: white;}
+    .blink-warning { animation: blink 1.5s infinite; background-color: #ffe066 !important; color: black !important;}
+
+    .legend-badge { display: inline-flex; align-items: center; white-space: nowrap; font-size: 0.75rem; margin-right: 8px; margin-bottom: 2px; }
+    .legend-circle { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; flex-shrink: 0; }
+    
+    .dropdown-menu { z-index: 1050 !important; }
+
+    .snmp-tab-btn { color: #adb5bd !important; background-color: transparent !important; border-color: transparent !important; font-weight: bold; }
+    .snmp-tab-btn:hover { color: #ffffff !important; border-color: #6c757d #6c757d transparent !important; }
+    .nav-tabs .nav-link.snmp-tab-btn.active { 
+        color: #ffe066 !important; 
+        background-color: #000000 !important; 
+        border-color: #6c757d #6c757d #000000 !important; 
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="row g-3">
+    <div class="col-lg-9">
+        <div class="card p-3" id="topology-card" style="transition: all 0.3s ease;">
+            
+            <div class="d-flex flex-wrap justify-content-between align-items-center mb-2 gap-2">
+                <h5 class="m-0 fw-bold text-secondary text-nowrap flex-shrink-0" id="topology-title" style="font-size: 1.1rem;">
+                    <i class="bi bi-globe2 me-1"></i>即時架構拓樸圖
+                </h5>
+                
+                <div class="d-flex flex-wrap align-items-center justify-content-end gap-2 flex-grow-1">
+                    
+                    <div class="btn-group btn-group-sm shadow-sm">
+                        <button class="btn btn-success text-white dropdown-toggle" data-bs-toggle="dropdown"><i class="bi bi-download me-1"></i>匯出圖表</button>
+                        <ul class="dropdown-menu dropdown-menu-dark dropdown-menu-end shadow">
+                            <li><h6 class="dropdown-header">靜態圖檔儲存</h6></li>
+                            <li><a class="dropdown-item" href="#" onclick="exportPNG()"><i class="bi bi-image me-2"></i>匯出 4K 高畫質 PNG</a></li>
+                            <li><a class="dropdown-item text-warning fw-bold" href="#" onclick="exportHTML()"><i class="bi bi-browser-chrome me-2"></i>匯出 HTML (離線互動版)</a></li>
+                            <li><a class="dropdown-item" href="#" onclick="exportSVG()"><i class="bi bi-vector-pen me-2"></i>匯出純淨向量 SVG</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><h6 class="dropdown-header">稽核審查文件</h6></li>
+                            <li><a class="dropdown-item text-info" href="#" onclick="exportPDF()"><i class="bi bi-file-earmark-pdf me-2"></i>產出 4K PDF 報表</a></li>
+                        </ul>
+                    </div>
+
+                    <div class="btn-group btn-group-sm shadow-sm">
+                        <button class="btn btn-grid-on" onclick="toggleGrid()" id="btn-grid" title="顯示/隱藏磁吸網格"><i class="bi bi-grid-3x3"></i></button>
+                        <button class="btn btn-outline-secondary fw-bold" onclick="alignNodes()" id="btn-align" title="強制依層級對齊Y軸"><i class="bi bi-distribute-vertical"></i>對齊</button>
+                        <button class="btn btn-outline-secondary" onclick="toggleDarkMode()" id="btn-theme" title="切換深/淺色模式"><i class="bi bi-moon-stars-fill"></i></button>
+                        <button class="btn btn-secondary text-white" onclick="toggleShowIP()" id="btn-show-ip">IP</button>
+                        <button class="btn btn-secondary text-white" onclick="toggleShowName()" id="btn-show-name">名稱</button>
+                        <button class="btn btn-outline-secondary" onclick="toggleShowLocation()" id="btn-show-location">位置</button>
+                        <button class="btn btn-primary text-white border-start" onclick="toggleFlow()" id="btn-show-flow"><i class="bi bi-activity me-1"></i>動態</button>
+                    </div>
+
+                    <div class="btn-group btn-group-sm shadow-sm">
+                        <span class="input-group-text bg-dark text-white border-secondary">版面</span>
+                        <button class="btn fw-bold" onclick="manageSlot(0, 'load')" id="btn-load-0">0</button>
+                        <button class="btn fw-bold" onclick="manageSlot(1, 'load')" id="btn-load-1">1</button>
+                        <button class="btn fw-bold" onclick="manageSlot(2, 'load')" id="btn-load-2">2</button>
+                        <button class="btn fw-bold" onclick="manageSlot(3, 'load')" id="btn-load-3">3</button>
+                        <button class="btn btn-secondary text-white dropdown-toggle border-secondary" style="background:#5c636a;" data-bs-toggle="dropdown">設定</button>
+                        <ul class="dropdown-menu dropdown-menu-dark dropdown-menu-end shadow">
+                            <li><h6 class="dropdown-header">記憶當前排列版面</h6></li>
+                            <li><a class="dropdown-item" href="#" onclick="manageSlot(0, 'save')"><i class="bi bi-save me-2"></i>覆寫至版面 0</a></li>
+                            <li><a class="dropdown-item" href="#" onclick="manageSlot(1, 'save')"><i class="bi bi-save me-2"></i>覆寫至版面 1</a></li>
+                            <li><a class="dropdown-item" href="#" onclick="manageSlot(2, 'save')"><i class="bi bi-save me-2"></i>覆寫至版面 2</a></li>
+                            <li><a class="dropdown-item" href="#" onclick="manageSlot(3, 'save')"><i class="bi bi-save me-2"></i>覆寫至版面 3</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><h6 class="dropdown-header">進階版面管理</h6></li>
+                            <li><a class="dropdown-item text-warning" href="#" onclick="manageSlot(null, 'reset_view')"><i class="bi bi-arrow-clockwise me-2"></i>重置畫面 (返回自動排列)</a></li>
+                            <li><a class="dropdown-item text-danger" href="#" onclick="manageSlot(null, 'clear_current')"><i class="bi bi-eraser me-2"></i>清除當前版面記憶</a></li>
+                            <li><a class="dropdown-item text-danger" href="#" onclick="manageSlot(null, 'clear_all')"><i class="bi bi-trash3 me-2"></i>清除所有 (0~3) 記憶</a></li>
+                        </ul>
+                    </div>
+                    
+                    <button class="btn btn-primary btn-sm shadow-sm flex-shrink-0" onclick="fetchSnmpData()"><i class="bi bi-search me-1"></i>重新掃描</button>
+                </div>
+            </div>
+            
+            <div id="mynetwork" class="border" tabindex="0"></div>
+        </div>
+    </div>
+    <div class="col-lg-3">
+        <div class="info-box shadow d-flex flex-column">
+            <h5 class="fw-bold border-bottom pb-2 mb-2"><i class="bi bi-info-circle-fill me-2"></i>詳細屬性資訊</h5>
+            
+            <div class="mb-3 p-2 bg-black rounded border border-secondary d-flex justify-content-start align-items-center flex-wrap gap-1" style="background-color: #1a202c !important;">
+                <div class="legend-badge"><span class="legend-circle" style="background-color: #0dcaf0;"></span><span class="text-info fw-bold">10G+ (藍)</span></div>
+                <div class="legend-badge"><span class="legend-circle" style="background-color: #20c997;"></span><span class="text-success fw-bold">1G (綠)</span></div>
+                <div class="legend-badge"><span class="legend-circle" style="background-color: #fd7e14;"></span><span class="text-orange fw-bold">100M (橘)</span></div>
+                <div class="legend-badge"><span class="legend-circle" style="background-color: #ffe066;"></span><span class="fw-bold text-light-yellow">SNMP異常 (黃)</span></div>
+                <div class="legend-badge"><span class="legend-circle" style="background-color: #dc3545;"></span><span class="text-danger fw-bold">斷線 (紅)</span></div>
+            </div>
+
+            <div id="detailContent"></div>
+            
+            <div class="mt-auto pt-2 border-top border-secondary text-center text-white-50" style="font-size:0.75rem;">核心引擎佈局：Vis.js Network</div>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="snmpDataModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal-content bg-dark text-white shadow-lg border-secondary">
+      <div class="modal-header border-secondary py-2">
+        <h6 class="modal-title text-warning fw-bold" id="snmpModalTitle"><i class="bi bi-terminal me-2"></i>SNMP 原始資料庫</h6>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body" id="snmpModalBody" style="padding: 1rem;">
+      </div>
+      <div class="modal-footer border-secondary py-1">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">關閉</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index: 1100" id="toastPlacement"></div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    var network = null;
+    var cachedTopologyData = null; 
+    var nodesDataSet = null; 
+    var edgesDataSet = null; 
+    var LEVEL_HEIGHT = 200; 
+    var GRID_SIZE = 10; 
+    
+    var activeSlot = null; 
+    var slotStatus = {0: 0, 1: 0, 2: 0, 3: 0}; 
+    var isGridVisible = true;
+    var isDarkMode = false;
+    
+    var isShowIP = true;
+    var isShowName = true;
+    var isShowLocation = false; 
+    var isShowFlow = true; 
+
+    var flowAnimationTime = 0;
+    var animationId = null;
+
+    // ==========================================
+    // 💡 匯出引擎 
+    // ==========================================
+
+    function exportHTML() {
+        if (!network || !nodesDataSet) return showToast('沒有可匯出的資料', 'warning');
+        showToast("🌐 正在封裝互動式圖表，請稍候...", "info");
+
+        var positions = network.getPositions();
+        var exportNodes = nodesDataSet.get().map(n => {
+            var nodeCopy = Object.assign({}, n);
+            if (positions[n.id]) {
+                nodeCopy.x = positions[n.id].x;
+                nodeCopy.y = positions[n.id].y;
+            }
+            return nodeCopy;
+        });
+        
+        var exportEdges = edgesDataSet.get();
+
+        var bgColor = isDarkMode ? '#1f293a' : '#f8f9fa';
+        var panelBg = isDarkMode ? 'rgba(0,0,0,0.8)' : 'rgba(255,255,255,0.95)';
+        var textColor = isDarkMode ? '#ffffff' : '#333333';
+        var borderColor = isDarkMode ? '#444444' : '#dddddd';
+
+        var htmlContent = `<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>網路拓樸圖 (離線互動版)</title>
+    <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"><\/script>
+    <style>
+        body { margin: 0; padding: 0; overflow: hidden; background-color: ${bgColor}; font-family: "Microsoft JhengHei", Arial, sans-serif; }
+        #mynetwork { width: 100vw; height: 100vh; outline: none; }
+        .title-bar { 
+            position: absolute; top: 20px; left: 20px; z-index: 10; 
+            background: ${panelBg}; color: ${textColor}; padding: 15px 25px; 
+            border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.15); 
+            pointer-events: none; border: 1px solid ${borderColor}; 
+        }
+        .title-bar h3 { margin: 0 0 8px 0; font-size: 18px; font-weight: bold; }
+        .title-bar div { font-size: 13px; color: #888; }
+    </style>
+</head>
+<body>
+    <div class="title-bar">
+        <h3>即時架構拓樸圖 (離線互動版)</h3>
+        <div>📌 匯出時間：${new Date().toLocaleString('zh-TW', {hour12: false})}</div>
+        <div style="margin-top: 5px; font-size: 12px; color: #0dcaf0;">滑鼠支援拖曳、滾輪縮放節點</div>
+    </div>
+    <div id="mynetwork"></div>
+
+    <script>
+        var nodes = new vis.DataSet(${JSON.stringify(exportNodes)});
+        var edges = new vis.DataSet(${JSON.stringify(exportEdges)});
+        var container = document.getElementById('mynetwork');
+        
+        var data = { nodes: nodes, edges: edges };
+        var options = {
+            physics: { enabled: false }, 
+            edges: { 
+                smooth: { type: 'cubicBezier', forceDirection: 'vertical', roundness: 0.5 },
+                width: 2 
+            },
+            nodes: { 
+                shape: 'box',
+                margin: { top: 3, right: 3, bottom: 3, left: 3 },
+                font: { face: '"Microsoft JhengHei", Arial, sans-serif', size: 14, bold: true, align: 'center' } 
+            },
+            interaction: { dragNodes: true, hover: true, multiselect: true, navigationButtons: true }
+        };
+        var network = new vis.Network(container, data, options);
+    <\/script>
+</body>
+</html>`;
+
+        var blob = new Blob([htmlContent], {type: 'text/html;charset=utf-8'});
+        var url = URL.createObjectURL(blob);
+        var link = document.createElement("a");
+        link.href = url;
+        link.download = `Network_Topology_${new Date().toISOString().slice(0,10)}.html`;
+        link.click();
+        
+        showToast('🌐 離線互動版 HTML 已成功產出！', 'success');
+    }
+
+    function exportSVG() {
+        if (!network || !nodesDataSet) return showToast('沒有可匯出的資料', 'warning');
+        
+        var pos = network.getPositions();
+        var minX = 99999, minY = 99999, maxX = -99999, maxY = -99999;
+        
+        nodesDataSet.get().forEach(n => {
+            var p = pos[n.id];
+            if(!p) return;
+            var boxW = n.widthConstraint ? n.widthConstraint.minimum : 150;
+            var boxH = n.heightConstraint ? n.heightConstraint.minimum : 60;
+            
+            minX = Math.min(minX, p.x - boxW/2); 
+            minY = Math.min(minY, p.y - boxH/2);
+            maxX = Math.max(maxX, p.x + boxW/2); 
+            maxY = Math.max(maxY, p.y + boxH/2);
+        });
+        
+        var padding = 150;
+        var width = maxX - minX + padding * 2;
+        var height = maxY - minY + padding * 2;
+        var offsetX = minX - padding;
+        var offsetY = minY - padding;
+
+        var svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="${offsetX} ${offsetY} ${width} ${height}">`;
+        
+        svg += `<style>
+            text { font-family: "Microsoft JhengHei", Arial, sans-serif; font-weight: bold; font-size: 14px; }
+            .node-rect { stroke-width: 2; rx: 6; ry: 6; }
+        </style>`;
+        svg += `<rect x="${offsetX}" y="${offsetY}" width="${width}" height="${height}" fill="${isDarkMode ? '#1f293a' : '#ffffff'}" />`;
+
+        edgesDataSet.get().forEach(e => {
+            var p1 = pos[e.from], p2 = pos[e.to];
+            if(!p1 || !p2) return;
+            var color = e.color ? e.color.color : '#ff5722';
+            var cy = p1.y + (p2.y - p1.y) * 0.5;
+            var dashes = (e.dashes && e.dashes.length > 0) ? `stroke-dasharray="${e.dashes.join(',')}"` : '';
+            svg += `<path d="M ${p1.x} ${p1.y} C ${p1.x} ${cy}, ${p2.x} ${cy}, ${p2.x} ${p2.y}" fill="transparent" stroke="${color}" stroke-width="2.5" ${dashes} />`;
+        });
+
+        nodesDataSet.get().forEach(n => {
+            var p = pos[n.id];
+            if(!p) return;
+            
+            var bg = n.color && n.color.background ? n.color.background : '#e0e0e0';
+            var border = n.color && n.color.border ? n.color.border : '#6c757d';
+            var fColor = n.font && n.font.color ? n.font.color : '#111111';
+
+            var boxW = n.widthConstraint ? n.widthConstraint.minimum : 150;
+            var boxH = n.heightConstraint ? n.heightConstraint.minimum : 60;
+            
+            var nx = p.x - boxW/2; 
+            var ny = p.y - boxH/2;
+
+            svg += `<rect class="node-rect" x="${nx}" y="${ny}" width="${boxW}" height="${boxH}" fill="${bg}" stroke="${border}" />`;
+
+            var lines = (n.label || '').split('\n');
+            var lineHeight = 16;
+            var startY = p.y - ((lines.length - 1) * lineHeight) / 2;
+            
+            lines.forEach((line, i) => {
+                let cleanLine = line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                svg += `<text x="${p.x}" y="${startY + i * lineHeight}" fill="${fColor}" dominant-baseline="central" text-anchor="middle">${cleanLine}</text>`;
+            });
+        });
+
+        svg += `</svg>`;
+        var blob = new Blob([svg], {type: 'image/svg+xml;charset=utf-8'});
+        var url = URL.createObjectURL(blob);
+        var link = document.createElement("a");
+        link.href = url;
+        link.download = `Network_Topology_${new Date().toISOString().slice(0,10)}.svg`;
+        link.click();
+        showToast('📐 SVG 完美動態向量圖已產出！', 'success');
+    }
+
+    function getHighResImageData(callback) {
+        var container = document.getElementById('mynetwork');
+        var oldWidth = container.style.width;
+        var oldHeight = container.style.height;
+
+        var oldGrid = isGridVisible;
+        var oldFlow = isShowFlow;
+        isGridVisible = false;
+        isShowFlow = false;
+
+        container.style.width = '3840px';
+        container.style.height = '2160px';
+        network.redraw();
+        network.fit(); 
+
+        setTimeout(() => {
+            try {
+                var canvas = container.getElementsByTagName("canvas")[0];
+                var dataURL = canvas.toDataURL("image/png", 1.0);
+
+                container.style.width = oldWidth || '100%';
+                container.style.height = oldHeight || 'calc(100vh - 130px)';
+                isGridVisible = oldGrid;
+                isShowFlow = oldFlow;
+                network.redraw();
+                network.fit();
+
+                callback(dataURL);
+            } catch (e) {
+                showToast("渲染發生錯誤：" + e.message, "danger");
+                container.style.width = oldWidth || '100%';
+                container.style.height = oldHeight || 'calc(100vh - 130px)';
+                network.redraw();
+                network.fit();
+            }
+        }, 1000); 
+    }
+
+    function exportPNG() {
+        if (!network) return showToast("圖表尚未初始化", "danger");
+        showToast("📸 正在渲染 4K 超高畫質圖片，請稍候...", "info");
+        
+        getHighResImageData(function(dataURL) {
+            var link = document.createElement("a");
+            link.download = `Network_Topology_${new Date().toISOString().slice(0,10)}.png`;
+            link.href = dataURL;
+            link.click();
+            showToast("✅ 4K 高畫質 PNG 已成功下載！", "success");
+        });
+    }
+
+    function exportPDF() {
+        if (!network) return showToast("圖表尚未初始化", "danger");
+        showToast("📄 正在渲染報表用 4K 高畫質圖片，請稍候...", "info");
+        
+        getHighResImageData(function(dataURL) {
+            try {
+                localStorage.setItem("topo_snapshot", dataURL);
+                window.open("/report", "_blank");
+                showToast("✅ PDF 報表分頁已成功開啟！", "success");
+            } catch (e) {
+                showToast("圖片資料過大無法暫存，請改用 PNG 下載。", "danger");
+            }
+        });
+    }
+
+    // ==========================================
+
+    document.addEventListener('keydown', function(e) {
+        if (!network || !cachedTopologyData) return;
+        var selectedNodes = network.getSelectedNodes();
+        if (selectedNodes.length === 0) return;
+        if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) return;
+        
+        e.preventDefault(); 
+        var positions = network.getPositions(selectedNodes);
+        
+        selectedNodes.forEach(nodeId => {
+            var pos = positions[nodeId];
+            if (!pos) return;
+            var newX = pos.x;
+            var newY = pos.y;
+            
+            if (e.key === 'ArrowUp') newY -= LEVEL_HEIGHT;
+            else if (e.key === 'ArrowDown') newY += LEVEL_HEIGHT;
+            else if (e.key === 'ArrowLeft') newX -= (e.shiftKey ? 50 : GRID_SIZE);
+            else if (e.key === 'ArrowRight') newX += (e.shiftKey ? 50 : GRID_SIZE);
+            
+            network.moveNode(nodeId, newX, newY);
+            var node = cachedTopologyData.nodes.find(n => n.id === nodeId);
+            if(node) { node.x = newX; node.y = newY; }
+        });
+    });
+
+    function showToast(message, type = 'success') {
+        const toastContainer = document.getElementById('toastPlacement');
+        const toastId = 'toast-' + Date.now();
+        let bgColor = type === 'danger' ? 'bg-danger' : (type === 'warning' ? 'bg-warning text-dark' : 'bg-success');
+        let icon = type === 'danger' ? 'bi-x-circle-fill' : 'bi-check-circle-fill';
+        if (type === 'warning') icon = 'bi-exclamation-triangle-fill';
+        if (type === 'info') { bgColor = 'bg-info text-dark'; icon = 'bi-info-circle-fill'; }
+
+        const toastHTML = `<div id="${toastId}" class="toast align-items-center text-white ${bgColor} border-0 mb-2 shadow-sm" role="alert"><div class="d-flex"><div class="toast-body fw-bold" style="font-size:0.9rem;"><i class="bi ${icon} me-2"></i>${message}</div><button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button></div></div>`;
+        toastContainer.insertAdjacentHTML('beforeend', toastHTML);
+        new bootstrap.Toast(document.getElementById(toastId)).show();
+    }
+
+    function createGridPattern(isDark) {
+        var c = document.createElement('canvas'); c.width = GRID_SIZE; c.height = GRID_SIZE;
+        var ctx = c.getContext('2d');
+        ctx.fillStyle = isDark ? "rgba(255, 255, 255, 0.15)" : "rgba(0, 0, 0, 0.15)";
+        ctx.fillRect(4, 4, 2, 2); return c;
+    }
+    var patternLight = createGridPattern(false);
+    var patternDark = createGridPattern(true);
+
+    function getLinkColor(speed, isDark) {
+        if (speed >= 10000) return isDark ? '#0dcaf0' : '#007bff'; 
+        if (speed >= 1000) return isDark ? '#20c997' : '#28a745';  
+        return '#fd7e14'; 
+    }
+
+    function toggleDarkMode() {
+        isDarkMode = !isDarkMode;
+        var mynetwork = document.getElementById('mynetwork');
+        var card = document.getElementById('topology-card');
+        var title = document.getElementById('topology-title');
+        var btnTheme = document.getElementById('btn-theme');
+        
+        if (isDarkMode) {
+            mynetwork.style.backgroundColor = '#1f293a'; 
+            card.classList.add('bg-dark', 'border-secondary'); card.style.backgroundColor = '#161e2a'; card.style.borderColor = '#2c3e50';
+            title.classList.replace('text-secondary', 'text-light');
+            btnTheme.innerHTML = '<i class="bi bi-sun-fill"></i>'; btnTheme.classList.replace('btn-outline-secondary', 'btn-outline-light');
+        } else {
+            mynetwork.style.backgroundColor = '#ffffff';
+            card.classList.remove('bg-dark', 'border-secondary'); card.style.backgroundColor = ''; card.style.borderColor = '';
+            title.classList.replace('text-light', 'text-secondary');
+            btnTheme.innerHTML = '<i class="bi bi-moon-stars-fill"></i>'; btnTheme.classList.replace('btn-outline-light', 'btn-outline-secondary');
+        }
+
+        updateAllLabels(); 
+        
+        if(network) {
+            var eUpdates = cachedTopologyData.edges.map(e => {
+                var fromNode = cachedTopologyData.nodes.find(node => node.id === e.from);
+                var toNode = cachedTopologyData.nodes.find(node => node.id === e.to);
+                var isEdgeDown = (fromNode && fromNode.status === 'down') || (toNode && toNode.status === 'down');
+                var isEdgeWarning = !isEdgeDown && ((fromNode && fromNode.status === 'warning') || (toNode && toNode.status === 'warning'));
+                
+                var baseColor = getLinkColor(e.speed || 1000, isDarkMode);
+                if (isEdgeDown) baseColor = '#dc3545';
+                else if (isEdgeWarning) baseColor = isDarkMode ? '#ffe066' : '#d39e00';
+
+                return { id: e.id, color: { color: baseColor, highlight: isDarkMode ? '#ffffff' : '#333333' } };
+            });
+            edgesDataSet.update(eUpdates);
+            network.redraw();
+        }
+    }
+
+    function toggleGrid() {
+        isGridVisible = !isGridVisible;
+        var btnGrid = document.getElementById('btn-grid');
+        if (isGridVisible) { btnGrid.classList.remove('btn-grid-off'); btnGrid.classList.add('btn-grid-on'); } 
+        else { btnGrid.classList.remove('btn-grid-on'); btnGrid.classList.add('btn-grid-off'); }
+    }
+
+    function toggleFlow() { 
+        isShowFlow = !isShowFlow; 
+        var btn = document.getElementById('btn-show-flow');
+        if (isShowFlow) { 
+            btn.classList.replace('btn-outline-secondary', 'btn-primary'); 
+            btn.classList.add('text-white'); 
+            startFlowAnimation(); 
+        } else { 
+            btn.classList.replace('btn-primary', 'btn-outline-secondary'); 
+            btn.classList.remove('text-white'); 
+            if (network) network.redraw(); 
+        }
+    }
+
+    function toggleShowIP() { isShowIP = !isShowIP; updateSwitchUI('btn-show-ip', isShowIP); updateAllLabels(); }
+    function toggleShowName() { isShowName = !isShowName; updateSwitchUI('btn-show-name', isShowName); updateAllLabels(); }
+    function toggleShowLocation() { isShowLocation = !isShowLocation; updateSwitchUI('btn-show-location', isShowLocation); updateAllLabels(); }
+
+    function updateSwitchUI(id, isShow) {
+        var btn = document.getElementById(id);
+        if (isShow) { btn.classList.replace('btn-outline-secondary', 'btn-secondary'); btn.classList.add('text-white'); } 
+        else { btn.classList.replace('btn-secondary', 'btn-outline-secondary'); btn.classList.remove('text-white'); }
+    }
+
+    function buildNodeLabel(node) {
+        var parts = [];
+        parts.push(node.brand || 'Unknown');
+        if (node.model) parts.push(node.model);
+        if (isShowIP && node.ip) parts.push(`(${node.ip})`);
+        if (isShowName && node.sysName) parts.push(`[${node.sysName}]`);
+        if (isShowLocation) parts.push(`📍 ${node.location ? node.location.trim() : '未設定'}`);
+        if (node.status === 'down') parts.push('🔴 徹底斷線'); 
+        else if (node.status === 'warning') parts.push('⚠️ SNMP異常'); 
+        return parts.join('\n');
+    }
+
+    function updateAllLabels() {
+        if (!nodesDataSet || !cachedTopologyData) return;
+        
+        var dummyCanvas = document.createElement('canvas');
+        var ctx = dummyCanvas.getContext('2d');
+        ctx.font = 'bold 14px "Microsoft JhengHei", Arial, sans-serif';
+
+        var positions = network ? network.getPositions() : {};
+        var updates = [];
+
+        cachedTopologyData.nodes.forEach(n => { 
+            let isDown = n.status === 'down';
+            let isWarning = n.status === 'warning';
+            let bgColor = isDown ? '#dc3545' : (isWarning ? '#ffe066' : (n.color || '#e0e0e0')); 
+            let fColor = isDown ? '#ffffff' : '#111111';
+            
+            let labelText = buildNodeLabel(n);
+            let lines = labelText.split('\n');
+            
+            let maxTextW = 0;
+            lines.forEach(l => {
+                let m = ctx.measureText(l);
+                if(m.width > maxTextW) maxTextW = m.width;
+            });
+            
+            let rawW = maxTextW + 10; 
+            let rawH = lines.length * 16 + 10; 
+            
+            let w10 = Math.ceil(rawW / 10) * 10;
+            let h10 = Math.ceil(rawH / 10) * 10;
+
+            let nodeUpdate = { 
+                id: n.id, 
+                label: labelText,
+                color: { background: bgColor, border: isDown ? '#842029' : (isWarning ? '#cca300' : '#6c757d'), highlight: { background: bgColor, border: '#000000' } },
+                font: { color: fColor, face: '"Microsoft JhengHei", Arial, sans-serif', size: 14, bold: true, align: 'center' },
+                widthConstraint: { minimum: w10, maximum: w10 },
+                heightConstraint: { minimum: h10, valign: 'middle' },
+                shape: 'box'
+            }; 
+
+            if (network && positions[n.id]) {
+                let currentPos = positions[n.id];
+                let oldW = n._lastW;
+                let oldH = n._lastH;
+
+                if (oldW && oldH && (oldW !== w10 || oldH !== h10)) {
+                    let newX = currentPos.x + (w10 - oldW) / 2;
+                    let newY = currentPos.y + (h10 - oldH) / 2;
+                    n.x = newX;
+                    n.y = newY;
+                    nodeUpdate.x = newX;
+                    nodeUpdate.y = newY;
+                }
+            }
+
+            n._lastW = w10;
+            n._lastH = h10;
+            updates.push(nodeUpdate);
+        });
+        
+        nodesDataSet.update(updates);
+    }
+
+    function renderGraph(forceHierarchical = null) {
+        if (!cachedTopologyData || cachedTopologyData.nodes.length === 0) return;
+        if (network !== null) { network.destroy(); }
+
+        var mappedEdges = cachedTopologyData.edges.map(e => {
+            let newEdge = Object.assign({}, e);
+            var fromNode = cachedTopologyData.nodes.find(node => node.id === e.from);
+            var toNode = cachedTopologyData.nodes.find(node => node.id === e.to);
+            var isEdgeDown = (fromNode && fromNode.status === 'down') || (toNode && toNode.status === 'down');
+            var isEdgeWarning = !isEdgeDown && ((fromNode && fromNode.status === 'warning') || (toNode && toNode.status === 'warning'));
+            
+            var baseColor = getLinkColor(e.speed || 1000, isDarkMode);
+            if (isEdgeDown) baseColor = '#dc3545';
+            else if (isEdgeWarning) baseColor = isDarkMode ? '#ffe066' : '#d39e00';
+
+            newEdge.color = { color: baseColor, highlight: isDarkMode ? '#ffffff' : '#333333' };
+            if (isEdgeDown) newEdge.dashes = [5, 5]; 
+            else if (isEdgeWarning) newEdge.dashes = [10, 5]; 
+            delete newEdge.arrows; 
+            return newEdge;
+        });
+
+        var mappedNodes = cachedTopologyData.nodes.map(n => Object.assign({}, n));
+
+        nodesDataSet = new vis.DataSet(mappedNodes);
+        edgesDataSet = new vis.DataSet(mappedEdges); 
+        
+        var container = document.getElementById('mynetwork');
+        var visData = { nodes: nodesDataSet, edges: edgesDataSet };
+        
+        var hasSavedPositions = cachedTopologyData.nodes.some(n => n.x != null && n.y != null);
+        if (forceHierarchical === true) hasSavedPositions = false; 
+        if (forceHierarchical === false) hasSavedPositions = true; 
+
+        var options = {
+            layout: { hierarchical: hasSavedPositions ? false : { direction: 'UD', sortMethod: 'directed', levelSeparation: LEVEL_HEIGHT, nodeSpacing: 350, treeSpacing: 500, parentCentralization: true } },
+            physics: { enabled: false },
+            edges: { 
+                smooth: { type: 'cubicBezier', forceDirection: 'vertical', roundness: 0.5 }, 
+                arrows: { to: { enabled: true, scaleFactor: 0.6 }, from: { enabled: true, scaleFactor: 0.6 } },
+                width: 2 
+            },
+            nodes: { shape: 'box', margin: { top: 3, right: 3, bottom: 3, left: 3 } }, 
+            interaction: { dragNodes: true, hover: true, multiselect: true }
+        };
+        
+        network = new vis.Network(container, visData, options);
+
+        updateAllLabels(); 
+
+        network.on("afterDrawing", function(ctx) {
+            if (isGridVisible) {
+                var viewPos = network.getViewPosition(); var scale = network.getScale();
+                var clientWidth = network.canvas.frame.canvas.clientWidth; var clientHeight = network.canvas.frame.canvas.clientHeight;
+                var worldWidth = clientWidth / scale; var worldHeight = clientHeight / scale;
+                var startX = viewPos.x - worldWidth / 2; var startY = viewPos.y - worldHeight / 2;
+                var pattern = ctx.createPattern(isDarkMode ? patternDark : patternLight, 'repeat');
+                ctx.save(); ctx.globalCompositeOperation = "destination-over"; ctx.fillStyle = pattern; ctx.fillRect(startX, startY, worldWidth, worldHeight); ctx.restore();
+            }
+
+            if (!isShowFlow) return;
+
+            var pos = network.getPositions();
+            ctx.save();
+            edgesDataSet.get().forEach(e => {
+                var p0 = pos[e.from];
+                var p3 = pos[e.to];
+                if (!p0 || !p3) return;
+                
+                var fromNode = cachedTopologyData.nodes.find(node => node.id === e.from);
+                var toNode = cachedTopologyData.nodes.find(node => node.id === e.to);
+                if ((fromNode && fromNode.status === 'down') || (toNode && toNode.status === 'down')) return;
+
+                var p1 = { x: p0.x, y: p0.y + (p3.y - p0.y) * 0.5 };
+                var p2 = { x: p3.x, y: p0.y + (p3.y - p0.y) * 0.5 };
+                
+                var dotColor = e.color && e.color.color ? e.color.color : getLinkColor(e.speed || 1000, isDarkMode);
+
+                for (var i = 0; i < 3; i++) {
+                    var cycle = (flowAnimationTime + i * 0.333) % 2; 
+                    var pingpong_t = cycle < 1 ? cycle : 2 - cycle; 
+                    var t = 0.18 + (pingpong_t * 0.64);
+                    var pt = getBezierPoint(t, p0, p1, p2, p3);
+
+                    ctx.beginPath();
+                    ctx.arc(pt.x, pt.y, 3.5, 0, 2 * Math.PI); 
+                    ctx.fillStyle = dotColor;
+                    ctx.shadowColor = dotColor;
+                    ctx.shadowBlur = 6; 
+                    ctx.fill();
+                }
+            });
+            ctx.restore();
+        });
+
+        if (!hasSavedPositions) {
+            network.once("afterDrawing", function() {
+                setTimeout(() => {
+                    var pos = network.getPositions(); var updates = [];
+                    for (var id in pos) { updates.push({id: id, x: pos[id].x, y: pos[id].y}); }
+                    nodesDataSet.update(updates); network.setOptions({ layout: { hierarchical: { enabled: false } } }); 
+                }, 300);
+            });
+        }
+
+        network.on("dragEnd", function (params) {
+            if (params.nodes.length > 0) {
+                var positions = network.getPositions(params.nodes);
+                
+                params.nodes.forEach(nodeId => {
+                    var currentPos = positions[nodeId];
+                    if (!currentPos) return;
+                    
+                    var snappedX = Math.round(currentPos.x / GRID_SIZE) * GRID_SIZE;
+                    var snappedY = Math.round(currentPos.y / LEVEL_HEIGHT) * LEVEL_HEIGHT; 
+                    
+                    network.moveNode(nodeId, snappedX, snappedY);
+                    var node = cachedTopologyData.nodes.find(n => n.id === nodeId);
+                    if(node) { node.x = snappedX; node.y = snappedY; }
+                });
+            }
+        });
+
+        network.on("oncontext", function (params) {
+            params.event.preventDefault(); 
+            var nodeId = network.getNodeAt(params.pointer.DOM);
+            if (nodeId) {
+                var nodeData = nodesDataSet.get(nodeId);
+                document.getElementById('snmpModalTitle').innerHTML = `<i class="bi bi-terminal me-2"></i>${nodeData.sysName || nodeData.ip} - SNMP 原始通訊資料`;
+                
+                var statusBadge = '';
+                if (nodeData.status === 'down') statusBadge = '<span class="badge bg-danger">🔴 徹底斷線</span>';
+                else if (nodeData.status === 'warning') statusBadge = '<span class="badge bg-warning text-dark">⚠️ SNMP 異常</span>';
+                else statusBadge = '<span class="badge bg-success">🟢 正常連線</span>';
+
+                let snmpRawHtml = '';
+                try {
+                    let rawData = JSON.parse(nodeData.snmp_raw || "{}");
+                    if (Array.isArray(rawData) && rawData.length >= 8) {
+                        let formattedJson = {
+                            "LLDP_SysNames (1.0.8802.1.1.2.1.4.1.1.9)": rawData[0],
+                            "LLDP_PortDesc (1.0.8802.1.1.2.1.4.1.1.7)": rawData[1],
+                            "LLDP_PortID (1.0.8802.1.1.2.1.4.1.1.6)": rawData[2],
+                            "LLDP_MgmtIP (1.0.8802.1.1.2.1.4.1.1.8)": rawData[3],
+                            "ifName (1.3.6.1.2.1.31.1.1.1.1)": rawData[4],
+                            "ifHighSpeed (1.3.6.1.2.1.31.1.1.1.15)": rawData[5],
+                            "ifSpeed (1.3.6.1.2.1.2.2.1.5)": rawData[6],
+                            "ifPhysAddress (1.3.6.1.2.1.2.2.1.6)": rawData[7]
+                        };
+                        Object.keys(formattedJson).forEach(k => {
+                            if (Object.keys(formattedJson[k]).length === 0) delete formattedJson[k];
+                        });
+                        snmpRawHtml = JSON.stringify(formattedJson, null, 2);
+                    } else {
+                        snmpRawHtml = JSON.stringify(rawData, null, 2);
+                    }
+                    if (snmpRawHtml === '{}') snmpRawHtml = "沒有抓取到詳細的 MIB 資料 (可能 Timeout 或無資料)";
+                } catch(e) {
+                    snmpRawHtml = "資料解析失敗或尚未掃描快取";
+                }
+
+                // 💡 修正 2：內部資料框精準設定 height: 40vh，最外層 Modal 禁止捲動
+                var content = `
+                    <div class="table-responsive">
+                        <table class="table table-sm table-bordered table-dark align-middle mb-3" style="font-size: 0.85rem;">
+                            <tbody>
+                                <tr><th width="25%" class="text-secondary bg-black">IP 位址</th><td class="text-info fw-bold">${nodeData.ip}</td><th width="25%" class="text-secondary bg-black">狀態</th><td>${statusBadge}</td></tr>
+                                <tr><th class="text-secondary bg-black">設備名稱</th><td colspan="3">${nodeData.sysName || '無'}</td></tr>
+                                <tr><th class="text-secondary bg-black">廠牌 / 型號</th><td colspan="3"><span class="text-warning">${nodeData.brand}</span> / ${nodeData.model || '無'}</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    
+                    <ul class="nav nav-tabs border-secondary mb-3" id="snmpTabs" role="tablist">
+                      <li class="nav-item" role="presentation">
+                        <button class="nav-link snmp-tab-btn active" id="sysdescr-tab" data-bs-toggle="tab" data-bs-target="#sysdescr" type="button" role="tab">系統描述 (sysDescr)</button>
+                      </li>
+                      <li class="nav-item" role="presentation">
+                        <button class="nav-link snmp-tab-btn" id="rawdata-tab" data-bs-toggle="tab" data-bs-target="#rawdata" type="button" role="tab">詳細 SNMP MIBs 資料</button>
+                      </li>
+                    </ul>
+                    <div class="tab-content" id="snmpTabsContent">
+                      <div class="tab-pane fade show active" id="sysdescr" role="tabpanel">
+                        <pre class="bg-black p-3 rounded border border-secondary text-success" style="font-size: 0.85rem; height: 40vh; overflow-y: auto; white-space: pre-wrap; font-family: Consolas, monospace; margin-bottom: 0;">${nodeData.sysDescr || '無資料'}</pre>
+                      </div>
+                      <div class="tab-pane fade" id="rawdata" role="tabpanel">
+                        <pre class="bg-black p-3 rounded border border-secondary text-info" style="font-size: 0.85rem; height: 40vh; overflow-y: auto; white-space: pre-wrap; font-family: Consolas, monospace; margin-bottom: 0;">${snmpRawHtml}</pre>
+                      </div>
+                    </div>
+                `;
+                
+                document.getElementById('snmpModalBody').innerHTML = content;
+                var snmpModal = new bootstrap.Modal(document.getElementById('snmpDataModal'));
+                snmpModal.show();
+            }
+        });
+
+        document.getElementById("detailContent").innerHTML = '<p class="text-white-50">點擊圖形可查看詳細資訊。</p>';
+        network.on("click", function (params) {
+            var detailDiv = document.getElementById("detailContent");
+            if (params.nodes.length > 0) {
+                var nodeId = params.nodes[0];
+                var nodeData = nodesDataSet.get(nodeId);
+                var realInfoHtml = nodeData.sysDescr ? `<hr class="border-secondary my-2"><div class="text-info fw-bold mb-1" style="font-size:0.85rem;"><i class="bi bi-cpu me-1"></i>設備資訊:</div><div class="bg-black p-2 rounded" style="font-size:0.8rem; color:#a8e6cf; max-height:80px; overflow-y:auto;">${nodeData.sysDescr}</div>` : '';
+                
+                var connectedEdges = edgesDataSet.get({ filter: function(item) { return item.from === nodeId || item.to === nodeId; }});
+                var portListHtml = '';
+                if (connectedEdges.length > 0) {
+                    portListHtml = connectedEdges.map(e => {
+                        var peerId = (e.from === nodeId) ? e.to : e.from;
+                        var peerNode = nodesDataSet.get(peerId);
+                        var peerName = peerNode ? (peerNode.sysName || peerId) : peerId;
+                        
+                        var speedVal = e.speed || 1000;
+                        var speedStr = speedVal >= 10000 ? (speedVal/1000)+'G' : (speedVal >= 1000 ? (speedVal/1000)+'G' : speedVal+'M');
+                        var badgeClass = speedVal >= 10000 ? 'bg-info text-dark' : (speedVal >= 1000 ? 'bg-success text-white' : 'bg-orange'); 
+                        
+                        var localPort = (e.from === nodeId) ? e.from_port : e.to_port;
+                        var remotePort = (e.from === nodeId) ? e.to_port : e.from_port;
+                        var hoverTitle = `本機端: ${localPort}  ⟷  遠端設備: ${peerName} (${remotePort})`;
+                        
+                        return `<div class="d-flex justify-content-between align-items-center border-bottom border-secondary pb-1 mb-1" style="font-size:0.78rem;">
+                                    <div class="text-truncate me-1" style="max-width:80%;" title="${hoverTitle}">
+                                        <span class="text-warning">${localPort}</span> 
+                                        <i class="bi bi-arrow-left-right text-white-50 px-1"></i> 
+                                        <span class="text-info">${peerName}</span> <span class="text-white-50">(${remotePort})</span>
+                                    </div>
+                                    <span class="badge ${badgeClass} p-1">${speedStr}</span>
+                                </div>`;
+                    }).join('');
+                    
+                    portListHtml = `<hr class="border-secondary my-2"><div class="text-warning fw-bold mb-1" style="font-size:0.85rem;"><i class="bi bi-usb-plug me-1"></i>實體對接狀態:</div><div class="port-list-container">${portListHtml}</div>`;
+                }
+
+                var statusBadge = '';
+                if (nodeData.status === 'down') statusBadge = `<span class="badge blink-danger ms-2"><i class="bi bi-x-circle-fill me-1"></i>徹底斷線</span>`;
+                else if (nodeData.status === 'warning') statusBadge = `<span class="badge blink-warning ms-2"><i class="bi bi-exclamation-circle-fill me-1"></i>SNMP異常 (Ping通)</span>`; 
+                else statusBadge = `<span class="badge bg-success ms-2">正常</span>`;
+
+                detailDiv.innerHTML = `
+                    <div class="card bg-dark border-secondary text-white p-2 mb-2 shadow-sm">
+                        <div class="d-flex align-items-center mb-2">
+                            <h5 class="text-warning fw-bold m-0"><i class="bi bi-hdd-network me-1"></i>節點屬性</h5>
+                            ${statusBadge}
+                        </div>
+                        <div style="font-size:0.85rem;">
+                            <div class="mb-0"><b>IP:</b> ${nodeData.ip}</div>
+                            <div class="mb-0"><b>名稱:</b> ${nodeData.sysName}</div>
+                            <div class="mb-0"><b>位置:</b> ${nodeData.location || '無資料'}</div>
+                        </div>
+                        ${portListHtml}
+                        ${realInfoHtml}
+                    </div>`;
+                    
+            } else if (params.edges.length > 0) {
+                var edgeData = edgesDataSet.get(params.edges[0]);
+                var speedVal = edgeData.speed || 1000;
+                
+                let speedColorClass = 'text-orange'; 
+                let speedText = speedVal + "M";
+                if (speedVal >= 10000) {
+                    speedColorClass = 'text-info'; 
+                    speedText = (speedVal / 1000) + "G";
+                } else if (speedVal >= 1000) {
+                    speedColorClass = 'text-success'; 
+                    speedText = (speedVal / 1000) + "G";
+                }
+
+                var fromNode = nodesDataSet.get(edgeData.from);
+                var toNode = nodesDataSet.get(edgeData.to);
+                var isEdgeDown = (fromNode && fromNode.status === 'down') || (toNode && toNode.status === 'down');
+                
+                let speedLabel = `<span class="${speedColorClass} fw-bold">${speedText}</span>`;
+                if (isEdgeDown) {
+                    speedLabel = "<span class='text-danger fw-bold'>設備徹底斷線，連線中斷</span>";
+                } else if ((fromNode && fromNode.status === 'warning') || (toNode && toNode.status === 'warning')) {
+                    speedLabel += " <span class='text-light-yellow' style='font-size:0.85rem;'>(連線中，但SNMP被阻擋)</span>"; 
+                }
+
+                var fromName = fromNode ? fromNode.sysName : edgeData.from;
+                var toName = toNode ? toNode.sysName : edgeData.to;
+
+                detailDiv.innerHTML = `
+                    <div class="card bg-dark border-secondary text-white p-2 shadow-sm">
+                        <div class="text-info fw-bold mb-1" style="font-size:0.95rem;"><i class="bi bi-link-45deg me-1"></i>連線分析</div>
+                        <div style="font-size:0.85rem;" class="mb-2">
+                            <b>速率:</b> ${speedLabel}
+                        </div>
+                        
+                        <div class="bg-black p-2 rounded border border-secondary mb-2" style="font-size:0.8rem;">
+                            <div class="text-white-50 mb-1"><i class="bi bi-diagram-2 me-1"></i>兩端對接資訊:</div>
+                            <div class="d-flex align-items-center justify-content-between mb-1">
+                                <span class="text-info text-truncate" style="max-width:40%;" title="${fromName}">${fromName}</span>
+                                <i class="bi bi-arrow-right text-white-50"></i>
+                                <span class="text-warning text-truncate" style="max-width:50%; text-align:right;" title="${edgeData.from_port}">${edgeData.from_port}</span>
+                            </div>
+                            <div class="d-flex align-items-center justify-content-between">
+                                <span class="text-info text-truncate" style="max-width:40%;" title="${toName}">${toName}</span>
+                                <i class="bi bi-arrow-right text-white-50"></i>
+                                <span class="text-warning text-truncate" style="max-width:50%; text-align:right;" title="${edgeData.to_port}">${edgeData.to_port}</span>
+                            </div>
+                        </div>
+                    </div>`;
+            } else {
+                detailDiv.innerHTML = '<p class="text-white-50">點擊圖形可查看詳細資訊。</p>';
+            }
+        });
+
+        startFlowAnimation();
+    }
+
+    function alignNodes() {
+        if (!network || !cachedTopologyData || cachedTopologyData.nodes.length === 0) return;
+        
+        var positions = network.getPositions();
+        var updates = [];
+        
+        var minLevel = Math.min(...cachedTopologyData.nodes.map(n => parseInt(n.level)));
+        var topLevelNodes = cachedTopologyData.nodes.filter(n => parseInt(n.level) === minLevel);
+        
+        var baseY = 0;
+        if (topLevelNodes.length > 0 && positions[topLevelNodes[0].id]) {
+            var refY = positions[topLevelNodes[0].id].y;
+            baseY = refY - ((minLevel - 1) * LEVEL_HEIGHT);
+            baseY = Math.round(baseY / LEVEL_HEIGHT) * LEVEL_HEIGHT;
+        }
+
+        cachedTopologyData.nodes.forEach(n => {
+            if (positions[n.id]) {
+                var lvl = parseInt(n.level) || 3;
+                var targetY = baseY + ((lvl - 1) * LEVEL_HEIGHT);
+                var targetX = Math.round(positions[n.id].x / GRID_SIZE) * GRID_SIZE;
+                
+                updates.push({ id: n.id, x: targetX, y: targetY });
+                n.x = targetX;
+                n.y = targetY;
+            }
+        });
+        
+        nodesDataSet.update(updates);
+        updates.forEach(u => network.moveNode(u.id, u.x, u.y));
+        
+        showToast("✅ 已依據設備層級完美對齊 Y 軸！", "success");
+    }
+
+    function getBezierPoint(t, p0, p1, p2, p3) {
+        var cx = 3 * (p1.x - p0.x); var bx = 3 * (p2.x - p1.x) - cx; var ax = p3.x - p0.x - cx - bx;
+        var cy = 3 * (p1.y - p0.y); var by = 3 * (p2.y - p1.y) - cy; var ay = p3.y - p0.y - cy - by;
+        var tSquared = t * t; var tCubed = tSquared * t;
+        return { x: (ax * tCubed) + (bx * tSquared) + (cx * t) + p0.x, y: (ay * tCubed) + (by * tSquared) + (cy * t) + p0.y };
+    }
+
+    function startFlowAnimation() {
+        if (animationId) { 
+            cancelAnimationFrame(animationId); 
+            animationId = null; 
+        }
+        function animate() {
+            flowAnimationTime += 0.015; 
+            if (isShowFlow && network) {
+                network.redraw(); 
+            }
+            animationId = requestAnimationFrame(animate);
+        }
+        animate();
+    }
+
+    function initApp() {
+        fetch('/api/topology/fast?t=' + Date.now())
+            .then(res => { if (!res.ok) throw new Error("伺服器回應異常"); return res.json(); })
+            .then(data => {
+                if (data.empty || !data.nodes || data.nodes.length === 0) {
+                    cachedTopologyData = {nodes: [], edges: []}; activeSlot = null; renderButtons();
+                    showToast('資料庫目前為空！<br><span style="font-size:0.85rem; font-weight:normal;">請前往右上角「設備管理 (Excel明細)」，使用「網段探索」功能來新增網管設備。</span>', 'warning');
+                } else {
+                    cachedTopologyData = data; 
+                    fetch('/api/topology/slots/status?t=' + Date.now())
+                        .then(res => res.json())
+                        .then(status => {
+                            for (let i = 0; i <= 3; i++) {
+                                slotStatus[i] = parseInt(status[i] || status[String(i)] || 0, 10);
+                            }
+                            let loaded = false;
+                            for (let i = 0; i <= 3; i++) {
+                                if (slotStatus[i] > 0) { manageSlot(i, 'load', true); loaded = true; break; }
+                            }
+                            if (!loaded) { manageSlot(null, 'reset_view', true); }
+                        });
+                }
+            })
+            .catch(err => {
+                console.error(err); cachedTopologyData = {nodes: [], edges: []};
+                showToast('無法連線到後端', 'danger');
+            });
+    }
+
+    function fetchSnmpData() {
+        if (!cachedTopologyData || !cachedTopologyData.nodes || cachedTopologyData.nodes.length === 0) {
+            return showToast('資料庫為空！請先到「設備管理」透過「網段探索」加入設備。', 'warning');
+        }
+
+        document.getElementById("detailContent").innerHTML = '<div class="text-center py-5"><div class="spinner-border text-light"></div><p class="mt-2 text-white-50">正在深度掃描與 Ping 測試中，請稍候...</p></div>';
+        
+        fetch('/api/topology?t=' + Date.now())
+            .then(res => res.json())
+            .then(data => {
+                if (data.error) throw new Error(data.error);
+                cachedTopologyData = data; activeSlot = null; 
+                renderGraph(true); updateSlotButtons(); 
+                
+                if (data.stats) {
+                    let msg = `掃描任務執行完畢！<br><span style="font-size:0.85rem; font-weight:normal;">⏱️ 總共耗時: <b>${data.stats.elapsed}</b> 秒 <br>📡 主動掃描: <b>${data.stats.scanned}</b> 台設備 <br>➕ 發現新設備: <b>${data.stats.added}</b> 台</span>`;
+                    showToast(msg, "success");
+                } else {
+                    showToast("系統掃描與驗證完成！", "success");
+                }
+            })
+            .catch(err => {
+                console.error(err);
+                document.getElementById("detailContent").innerHTML = `<p class="text-danger">失敗：${err.message}</p>`;
+                showToast(`掃描失敗：${err.message}`, 'danger');
+            });
+    }
+
+    function renderButtons() {
+        for (let i = 0; i <= 3; i++) {
+            let btn = document.getElementById(`btn-load-${i}`);
+            if (!btn) continue;
+            
+            let count = parseInt(slotStatus[i] || slotStatus[String(i)] || 0, 10);
+            
+            if (activeSlot === i || activeSlot === String(i)) {
+                btn.style.cssText = 'background-color: #ff9800 !important; border-color: #ff9800 !important; color: #000000 !important;';
+                btn.title = `當前版面 ${i}`;
+            } else if (count > 0) {
+                btn.style.cssText = 'background-color: #0dcaf0 !important; border-color: #0dcaf0 !important; color: #ffffff !important;';
+                btn.title = `已有 ${count} 台`;
+            } else {
+                btn.style.cssText = 'background-color: #ffffff !important; border-color: #cccccc !important; color: #6c757d !important;';
+                btn.title = '尚未儲存';
+            }
+        }
+    }
+
+    function updateSlotButtons() { 
+        fetch('/api/topology/slots/status?t=' + Date.now()).then(res => res.json()).then(status => { 
+            for (let i = 0; i <= 3; i++) slotStatus[i] = parseInt(status[i] || status[String(i)] || 0, 10);
+            renderButtons(); 
+        }); 
+    }
+
+    function manageSlot(slotId, action, silent = false) {
+        if (!cachedTopologyData) return;
+        
+        if (action === 'reset_view') {
+            fetch('/api/topology/positions/reset', { method: 'POST' }).then(res => res.json()).then(result => {
+                if (result.success) { 
+                    cachedTopologyData.nodes.forEach(n => { delete n.x; delete n.y; }); 
+                    activeSlot = null; renderGraph(true); renderButtons(); 
+                    if (!silent) showToast("已還原為預設階層排列", "info"); 
+                }
+            }); return;
+        }
+
+        if (action === 'clear_current') {
+            if (activeSlot === null) return showToast("目前並非處於自訂版面，無法清除。", "warning");
+            if(!confirm(`確定要清除 [版面 ${activeSlot}] 的記憶嗎？`)) return;
+            
+            fetch('/api/topology/slots/clear', { 
+                method: 'POST', 
+                headers: { 'Content-Type': 'application/json' }, 
+                body: JSON.stringify({ slot: activeSlot }) 
+            }).then(res => res.json()).then(result => {
+                if (result.success) { 
+                    updateSlotButtons(); 
+                    manageSlot(null, 'reset_view', true);
+                    showToast(result.message, "success"); 
+                }
+            }); return;
+        }
+
+        if (action === 'clear_all') {
+            if(!confirm('確定要徹底清除 0~3 所有版面記憶嗎？此動作無法復原。')) return;
+            fetch('/api/topology/slots/clear', { 
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }, 
+                body: JSON.stringify({ slot: 'all' })
+            }).then(res => res.json()).then(result => {
+                if (result.success) { 
+                    updateSlotButtons(); 
+                    manageSlot(null, 'reset_view', true);
+                    showToast(result.message, "success"); 
+                }
+            }); return;
+        }
+
+        if (action === 'load' && (!cachedTopologyData.nodes || cachedTopologyData.nodes.length === 0)) {
+            return showToast("資料庫為空！請前往右上角「設備管理」分頁，使用「網段探索」來新增設備。", "warning"); 
+        }
+
+        if (action === 'save') {
+            var positions = network.getPositions();
+            fetch('/api/topology/slots/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slot: slotId, positions: positions }) })
+            .then(res => res.json()).then(res => { 
+                showToast(res.message, res.success ? 'success' : 'danger'); 
+                if (res.success) { activeSlot = slotId; updateSlotButtons(); } 
+            });
+        } 
+        else if (action === 'load') {
+            fetch('/api/topology/slots/load', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ slot: slotId }) })
+            .then(res => res.json()).then(res => {
+                if (res.success) { 
+                    cachedTopologyData.nodes.forEach(n => { if (res.positions && res.positions[n.id]) { n.x = res.positions[n.id].x; n.y = res.positions[n.id].y; } }); 
+                    activeSlot = slotId; renderGraph(false); renderButtons(); 
+                    if (!silent) showToast(`載入版面 ${slotId}`, 'success');
+                } else { if (!silent) showToast(res.message, 'danger'); }
+            });
+        }
+    }
+    
+    document.addEventListener("DOMContentLoaded", initApp);
+</script>
+{% endblock %}
